@@ -1,1 +1,2 @@
-# EODP_NOEL
+# eodp
+EODP main repository
