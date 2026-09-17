@@ -93,6 +93,7 @@ class opticalPhase(initIsm):
         :return: TOA image in irradiances [mW/m2]
         """
         # TODO
+        toa = Tr * toa * (np.pi /4) * ((D/f)**2)
         return toa
 
 
@@ -115,6 +116,25 @@ class opticalPhase(initIsm):
         :return: TOA image 2D in radiances [mW/m2]
         """
         # TODO
+        isrf, wv_isrf = readIsrf(self.auxdir + '/' + self.ismConfig.isrffile, band)
+
+        # 0 inicialitez output
+        toa = np.zeros((sgm_toa.shape[0], sgm_toa.shape[1]))
+        # 1. normalis ISRF
+        isrf = isrf / np.sum(isrf) 
+
+        # 2. convert ISRF wavelengths to nanometers
+        wv_isrf = wv_isrf * 1000
+
+        for ialt in range(sgm_toa.shape[0]):
+            for iact in range(sgm_toa.shape[1]):
+                cs = interp1d(sgm_wv, sgm_toa[ialt, iact, :], fill_value=(0, 0), bounds_error=False)
+                sgm_inter = cs(wv_isrf)
+                toa[ialt, iact] = np.sum(sgm_inter * isrf)
+
+
         return toa
+
+
 
 
