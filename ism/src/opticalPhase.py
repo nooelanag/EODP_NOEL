@@ -121,7 +121,7 @@ class opticalPhase(initIsm):
         # 0 inicialitez output
         toa = np.zeros((sgm_toa.shape[0], sgm_toa.shape[1]))
         # 1. normalis ISRF
-        isrf = isrf / np.sum(isrf) 
+        isrf = isrf / np.sum(isrf)
 
         # 2. convert ISRF wavelengths to nanometers
         wv_isrf = wv_isrf * 1000
