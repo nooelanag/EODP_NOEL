@@ -105,6 +105,15 @@ class detectionPhase(initIsm):
         :return: Toa in photons
         """
         #TODO
+        # Energy received by each pixel during the integration time [J]
+        # (mW/m2 -> W/m2 with the 1e-3 factor)
+        E_in = toa * 1e-3 * area_pix * tint
+
+        # Energy of a single photon [J]
+        E_photon = self.constants.h_planck * self.constants.speed_light / wv
+
+        # Number of photons per pixel [ph]
+        toa_ph = E_in / E_photon
         return toa_ph
 
     def phot2Electr(self, toa, QE):
@@ -115,6 +124,12 @@ class detectionPhase(initIsm):
         :return: toa in electrons
         """
         #TODO
+        toae = toa * QE
+
+        # Saturation: the number of electrons cannot exceed the full well capacity
+        FWC = self.ismConfig.FWC
+        toae[toae > FWC] = FWC
+
         return toae
 
     def badDeadPixels(self, toa,bad_pix,dead_pix,bad_pix_red,dead_pix_red):
@@ -128,6 +143,20 @@ class detectionPhase(initIsm):
         :return: toa in e- including bad & dead pixels
         """
         #TODO
+        nact = toa.shape[1]
+
+        # Bad pixels: evenly spaced ACT columns, one every 100/bad_pix pixels
+        if bad_pix > 0:
+            step_bad = int(round(100.0 / bad_pix))
+            idx_bad = np.arange(step_bad // 2, nact, step_bad)
+            toa[:, idx_bad] = toa[:, idx_bad] * (1.0 - bad_pix_red)
+
+        # Dead pixels: evenly spaced ACT columns, one every 100/dead_pix pixels
+        if dead_pix > 0:
+            step_dead = int(round(100.0 / dead_pix))
+            idx_dead = np.arange(step_dead - 1, nact, step_dead)
+            toa[:, idx_dead] = toa[:, idx_dead] * (1.0 - dead_pix_red)
+
         return toa
 
     def prnu(self, toa, kprnu):
@@ -138,6 +167,14 @@ class detectionPhase(initIsm):
         :return: TOA after adding PRNU [e-]
         """
         #TODO
+        # One random gain per ACT pixel (standard normal, scaled by kprnu),
+        # shared by all ALT lines because PRNU is a fixed pattern of the detector
+        #prnu = np.random.normal(0.0, 1.0, toa.shape[1]) * kprnu
+
+        # Multiplicative effect: TOA * (1 + PRNU), broadcast over the ALT dimension
+        #toa = toa * (1.0 + prnu)
+        prnu_eff = np.random.normal(0, 1, toa.shape[1])  # standard normal
+        toa = toa * (1.0 + prnu_eff * kprnu)
         return toa
 
 
@@ -152,5 +189,26 @@ class detectionPhase(initIsm):
         :param ds_B_coeff: Empirical parameter of the model 6040 K
         :return: TOA in [e-] with dark signal
         """
-        #TODO
+        # TODO
+        Sd = ds_A_coeff * (T / Tref) ** 3 * np.exp(-ds_B_coeff * (1.0 / T - 1.0 / Tref))
+
+        dsnu = np.abs(np.random.normal(0, 1, toa.shape[1])) * kdsnu
+
+        DS = Sd * (1.0 + dsnu)
+
+        toa = toa + DS
         return toa
+        #TODO
+        #nact = toa.shape[1]
+
+        #dsnu = np.abs(np.random.normal(0,1,nact))*kdsnu
+
+        #sd = ds_A_coeff * (T/Tref) ** 3 * np.exp(-ds_B_coeff * (1/T-1/Tref))
+
+        #ds = sd*(1+dsnu)
+
+        #toa = toa +ds
+        #return toa
+
+
+

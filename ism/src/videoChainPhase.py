@@ -56,7 +56,10 @@ class videoChainPhase(initIsm):
         :return: output toa in [V]
         """
         #TODO
-        return toa
+        # Read-out: electrons -> volts with the output conversion factor,
+        # then amplification with the ADC gain
+        toa_v = toa * OCF * gain_adc
+        return toa_v
 
     def digitisation(self, toa, bit_depth, min_voltage, max_voltage):
         """
@@ -68,5 +71,30 @@ class videoChainPhase(initIsm):
         :return: toa in digital counts
         """
         #TODO
+        # Saturation: the signal cannot go above the maximum voltage of the ADC
+        # Saturation: the signal cannot go above the maximum voltage of the ADC
+        toa = np.minimum(toa, max_voltage)
+
+        # Quantisation: map [min_voltage, max_voltage] onto 0 ... 2^bit_depth - 1
+        # and round to the nearest integer count
+        levels = 2 ** bit_depth - 1
+        toa_dn = np.round((toa - min_voltage) / (max_voltage - min_voltage) * levels)
+
+        # Counts cannot be negative
+        toa_dn = np.maximum(toa_dn, 0)
         return toa_dn
+
+    #crossvalidation of the outputs
+    #MTF PLot -> dimensioning MTF? Explicar las dos gráficas y decir cual es la MTF dominante
+    # What are the unit conversions?
+    #isrf_toa_optical [mW/(m^{2}*sr)]
+    #rad2irrad -> [FACTOR]
+    #IRR2PH
+    #PH2E
+    #E2V
+    #V2DigitalNumbers
+    #From central pixel:  toa[50,75]
+
+    #Check if the central picture after the convertion we get the same outputs. PER BAND (VNIR0 to VNIR-4)
+
 

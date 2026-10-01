@@ -199,20 +199,97 @@ class mtf:
 
     def plotMtf(self,Hdiff, Hdefoc, Hwfe, Hdet, Hsmear, Hmotion, Hsys, nlines, ncolumns, fnAct, fnAlt, directory, band):
         """
-        Plotting the system MTF and all of its contributors
-        :param Hdiff: Diffraction MTF
-        :param Hdefoc: Defocusing MTF
-        :param Hwfe: Wavefront electronics MTF
-        :param Hdet: Detector MTF
-        :param Hsmear: Smearing MTF
-        :param Hmotion: Motion blur MTF
-        :param Hsys: System MTF
-        :param nlines: Number of lines in the TOA
-        :param ncolumns: Number of columns in the TOA
-        :param fnAct: normalised frequencies in the ACT direction (f/(1/w))
-        :param fnAlt: normalised frequencies in the ALT direction (f/(1/w))
-        :param directory: output directory
-        :param band: band
-        :return: N/A
-        """
-        #TODO
+               Plotting the system MTF and all of its contributors
+               :param Hdiff: Diffraction MTF
+               :param Hdefoc: Defocusing MTF
+               :param Hwfe: Wavefront electronics MTF
+               :param Hdet: Detector MTF
+               :param Hsmear: Smearing MTF
+               :param Hmotion: Motion blur MTF
+               :param Hsys: System MTF
+               :param nlines: Number of lines in the TOA
+               :param ncolumns: Number of columns in the TOA
+               :param fnAct: normalised frequencies in the ACT direction (f/(1/w))
+               :param fnAlt: normalised frequencies in the ALT direction (f/(1/w))
+               :param directory: output directory
+               :param band: band
+               :return: N/A
+               """
+        # TODO
+
+        """Plotting the system MTF and all of its contributors."""
+        mid_line = nlines // 2
+        mid_col = ncolumns // 2
+
+        mtf_dict = {
+            "Diffraction MTF": Hdiff,
+            "Defocus MTF": Hdefoc,
+            "WFE Aberrations MTF": Hwfe,
+            "Detector MTF": Hdet,
+            "Smearing MTF": Hsmear,
+            "Motion blur MTF": Hmotion,
+            "System MTF": Hsys,
+        }
+
+        # Como hay que hacer 2 plot, definimos una función para representar ALT y ACT
+        def _plot_slice(x_freq, direction_label, filename):
+            plt.figure(figsize=(9, 6))
+
+            # Manejo de dimensiones de frecuencia
+            if x_freq.ndim == 2:
+                x_vec = (
+                    x_freq[mid_line, :]
+                    if direction_label == "ACT"
+                    else x_freq[:, mid_col]
+                )
+            else:
+                x_vec = x_freq
+
+            # Filtrar solo frecuencias no negativas (hasta Nyquist u otro límite)
+            mask = x_vec >= 0
+            sort_idx = np.argsort(x_vec[mask])
+            x_plot = x_vec[mask][sort_idx]
+
+            # Representación de cada uno de los mtf
+            for label, h_data in mtf_dict.items():
+                if h_data.ndim == 2:
+                    slice_data = (
+                        h_data[mid_line, :]
+                        if direction_label == "ACT"
+                        else h_data[:, mid_col]
+                    )
+                else:
+                    slice_data = h_data
+
+                y_plot = slice_data[mask][sort_idx]
+
+                if label == "System MTF":
+                    plt.plot(
+                        x_plot, y_plot, label=label, color="black", linewidth=2.0
+                    )
+                else:
+                    plt.plot(x_plot, y_plot, label=label, linewidth=1.5, alpha=0.85)
+
+            # Línea vertical de Nyquist en 0.5
+            plt.axvline(
+                x=0.5, color="black", linestyle="--", label="f Nyquist", linewidth=1.5
+            )
+
+            plt.title(f"System MTF - slice {direction_label}")
+            plt.xlabel("Spatial frequencies f/(1/w) [-]")
+            plt.ylabel("MTF")
+            plt.xlim(0.0, 0.51)
+            plt.ylim(-0.02, 1.05)
+            plt.grid(True, linestyle="-", alpha=0.4)
+            plt.legend(loc="lower left", fontsize="small")
+            plt.tight_layout()
+
+            # Guardar en directorio original
+            plt.savefig(os.path.join(directory, filename), dpi=300)
+
+            # Mostrar imagen
+            plt.show()
+
+        # Se llama a la función anterior creada para los dos plot
+        _plot_slice(fnAct, "ACT", "mtf_act.png")
+        _plot_slice(fnAlt, "ALT", "mtf_alt.png")
