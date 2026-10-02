@@ -96,5 +96,25 @@ class videoChainPhase(initIsm):
     #From central pixel:  toa[50,75]
 
     #Check if the central picture after the convertion we get the same outputs. PER BAND (VNIR0 to VNIR-4)
-
-
+    
+    
+#First question:
+#    - Do a crossvalidation of all the outputs, comparing the files from my own outputs ("C:\\Users\\Noel\\Documents\\NOEL\\UNIVERSIDAD\\MASTER\\TELECO\\ACADEMICO\\26-27\\1er cuatri\\EODP\\FILES\\EODP_TER_2021\\EODP_TER_2021\\EODP-TS-ISM\\output_noel") and the teachers outputs ("C:\\Users\\Noel\\Documents\\NOEL\\UNIVERSIDAD\\MASTER\\TELECO\\ACADEMICO\\26-27\\1er cuatri\\EODP\\FILES\\EODP_TER_2021\\EODP_TER_2021\\EODP-TS-ISM\\output"). Lets make these directories as variables so that I can modify in case they are not exactly like that. After crossvalidation is done, generate a brief report with the conclussions (if the data in each file is the same as the teachers data).
+#
+#Second question:
+#   - Do the MTF plot. What is the dimensioning of the MTF? Explain both graphs and say which is the dominant one (and why). 
+#
+#Third question:
+#   - Do a table checking the unit conversion:
+#       * isrf_toa_optical [mW/(m^{2}*sr)]
+#       * rad2irrad -> [FACTOR]
+#       * IRR2PH
+#       * PH2E
+#       * E2V
+#       * V2DigitalNumbers
+#   - From the central pixel: ¿¿¿toa[50,75]???
+#   - Check if the central picture after the cconvertion we get the same outputs. PER BAND (VNIR0 to VNIR4).
+#
+#
+#
+#THIS IS WHAT I UNDERSTOOD, SO SOME THINGS MIGHT BE MISTAKEN!!!
