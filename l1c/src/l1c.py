@@ -10,6 +10,7 @@ from scipy.interpolate import bisplrep, bisplev
 import matplotlib.pyplot as plt
 from common.io.l1cProduct import writeL1c
 from matplotlib import cm
+import geopy
 
 class l1c(initL1c):
 
@@ -62,8 +63,31 @@ class l1c(initL1c):
         :param band: band
         :return: L1C radiances, L1C latitude and longitude in degrees
         '''
-        #TODO
+        # TODO
+
+        m = mgrs.MGRS()
+        mgrs_tiles = set([])
+        for ii in range(toa.shape[0]):  # 100
+            for jj in range(toa.shape[1]):  # 150
+                auxi = m.toMGRS(lat[ii, jj], lon[ii, jj], MGRSPrecision=self.l1cConfig.mgrs_tile_precision)
+                mgrs_tiles.add(auxi)
+
+        mgrs_tiles = list(mgrs_tiles)
+
+        toa_l1c = np.zeros(len(mgrs_tiles))
+        lat_l1c = np.zeros(len(mgrs_tiles))
+        lon_l1c = np.zeros(len(mgrs_tiles))
+
+        tck = bisplrep(lat, lon, toa)
+
+        for ii in range(len(mgrs_tiles)):
+            (lat_l1c[ii], lon_l1c[ii]) = m.toLatLon(mgrs_tiles[ii])
+            toa_l1c = bisplev(lat_l1c[ii], lon_l1c[ii], tck)
+
         return lat_l1c, lon_l1c, toa_l1c
+
+    # Plot L1B grid (red) versis L1C (blue)
+    # Plot SPATIAL SAMPLING DISTANCE [HAVERSINE] FOR CENTRAL ROW OF THE L1B GEOMETRY.
 
     def checkSize(self, lat,toa):
         '''
