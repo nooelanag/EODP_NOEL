@@ -1,10 +1,31 @@
-# CROSS VALIDATE L1B OUTPUTS EQUALIZED
+# ============================================================
+# L1B TEST SCRIPTS
+# ============================================================
+# run_crossvalidation()
+#     Cross validate los ficheros .nc de mis salidas L1B (ecualizadas)
+#     contra las salidas de referencia del profesor.
+#     Vuelca el informe a REPORT_FILENAME dentro de la carpeta de salida.
+#
+# plot_equalization_effect()
+#     Genera el PNG comparando la TOA L1B ecualizada (negro),
+#     la no ecualizada (rojo) y la verdad / salida del ISRF (azul).
+#
+# Ejecucion:
+#     python l1b/test/l1b_test.py
+# ============================================================
+
+import io
+from contextlib import redirect_stdout
 from pathlib import Path
+from typing import Optional
+
 import numpy as np
 import xarray as xr
+import matplotlib.pyplot as plt
+
 
 # ============================================================
-# CONFIGURACIÓN
+# CONFIGURACION - CROSS VALIDATION
 # ============================================================
 
 # Carpetas que contienen los ficheros .nc
@@ -16,13 +37,59 @@ FOLDER_2 = Path(
     r"C:\Users\Noel\Documents\NOEL\UNIVERSIDAD\MASTER\TELECO\ACADEMICO\26-27\1er cuatri\EODP\FILES\EODP_TER_2021\EODP_TER_2021\EODP-TS-L1B\output"
 )
 
-# Tolerancia para considerar que dos valores son iguales
+# Tolerancia para considerar que dos valores son iguales.
+# rtol = 1e-5 equivale a una diferencia relativa de 1e-3 %,
+# que es el requisito de cross-validation.
 RTOL = 1e-5
 ATOL = 1e-8
 
+# ---- Informe de texto ----
+# Carpeta donde se guarda el informe.
+# REPORT_DIR = None  ->  se guarda en FOLDER_1 (mis propias salidas)
+REPORT_DIR = None
+REPORT_FILENAME = "l1b_crossvalidation_report.txt"
+
 
 # ============================================================
-# FUNCIONES
+# CONFIGURACION - PLOT DE LA ECUALIZACION
+# ============================================================
+
+# Fichero SIN equalización (en rojo)
+NO_EQ_FILE = Path(
+    r"C:\Users\Noel\Documents\NOEL\UNIVERSIDAD\MASTER\TELECO\ACADEMICO\26-27\1er cuatri\EODP\FILES\EODP_TER_2021\EODP_TER_2021\EODP-TS-L1B\output_noel_no_equalized\l1b_toa_VNIR-0.nc"
+)
+
+# Fichero CON equalización (en negro)
+EQ_FILE = Path(
+    r"C:\Users\Noel\Documents\NOEL\UNIVERSIDAD\MASTER\TELECO\ACADEMICO\26-27\1er cuatri\EODP\FILES\EODP_TER_2021\EODP_TER_2021\EODP-TS-L1B\output_noel\l1b_toa_VNIR-0.nc"
+)
+
+# Fichero de ENTRADA / ISRF (en azul)
+ISRF_FILE = Path(
+    r"C:\Users\Noel\Documents\NOEL\UNIVERSIDAD\MASTER\TELECO\ACADEMICO\26-27\1er cuatri\EODP\FILES\EODP_TER_2021\EODP_TER_2021\EODP-TS-L1B\input\ism_toa_isrf_VNIR-0.nc"
+)
+
+# Carpeta y nombre del PNG de salida.
+# Se guarda dentro de output_noel para que entre en el data pack.
+OUTPUT_DIR = Path(
+    r"C:\Users\Noel\Documents\NOEL\UNIVERSIDAD\MASTER\TELECO\ACADEMICO\26-27\1er cuatri\EODP\FILES\EODP_TER_2021\EODP_TER_2021\EODP-TS-L1B\output_noel"
+)
+OUTPUT_FILENAME = "equalization_effect_VNIR-0.png"
+
+# Fila (row) a extraer de cada fichero
+ROW_INDEX = 50
+
+# Nombre de la variable a leer dentro del .nc.
+# Si se deja en None, se usa automáticamente la única variable de datos
+# (no-coordenada) que tenga el fichero.
+VARIABLE_NAME = None
+
+# Nombre de la banda, usado solo para el título de la gráfica
+BAND_NAME = "VNIR-0"
+
+
+# ============================================================
+# CROSS VALIDATION - FUNCIONES
 # ============================================================
 
 def compare_netcdf_files(file1, file2):
@@ -100,11 +167,35 @@ def compare_netcdf_files(file1, file2):
         return False, np.inf
 
 
-# ============================================================
-# CROSS VALIDATION
-# ============================================================
+def save_report(report_lines):
+    """
+    Guarda el informe de cross validation en un fichero de texto.
+    :param report_lines: lista de lineas del informe
+    """
+    report_dir = REPORT_DIR if REPORT_DIR is not None else FOLDER_1
 
-def main():
+    try:
+        report_dir.mkdir(parents=True, exist_ok=True)
+        report_path = report_dir / REPORT_FILENAME
+
+        with open(report_path, "w", encoding="utf-8") as handler:
+            handler.write("\n".join(report_lines) + "\n")
+
+        print(f"\nInforme guardado en: {report_path}")
+
+    except OSError as error:
+        print(f"\nAVISO: no se pudo guardar el informe: {error}")
+
+
+def run_crossvalidation():
+    """Compara todos los .nc comunes a FOLDER_1 y FOLDER_2."""
+
+    report_lines = []
+
+    def log(message=""):
+        """Imprime por consola y acumula la linea para el informe."""
+        print(message)
+        report_lines.append(message)
 
     # Obtener SOLO ficheros .nc
     files_1 = {
@@ -122,17 +213,24 @@ def main():
     # Buscar únicamente los ficheros que existen en ambas carpetas
     common_files = sorted(set(files_1) & set(files_2))
 
-    print("=" * 80)
-    print("CROSS VALIDATION DE FICHEROS NETCDF")
-    print("=" * 80)
+    log("=" * 80)
+    log("CROSS VALIDATION DE FICHEROS NETCDF")
+    log("=" * 80)
+    log(f"Mis salidas       : {FOLDER_1}")
+    log(f"Salidas referencia: {FOLDER_2}")
+    log(f"Criterio aplicado : numpy.allclose(rtol={RTOL:g}, atol={ATOL:g})")
+    log(f"                    rtol={RTOL:g} equivale a una diferencia "
+        f"relativa de 1e-3 %")
+    log("=" * 80)
 
-    print(f"Ficheros .nc en carpeta 1: {len(files_1)}")
-    print(f"Ficheros .nc en carpeta 2: {len(files_2)}")
-    print(f"Ficheros encontrados en ambas carpetas: {len(common_files)}")
-    print("=" * 80)
+    log(f"Ficheros .nc en carpeta 1: {len(files_1)}")
+    log(f"Ficheros .nc en carpeta 2: {len(files_2)}")
+    log(f"Ficheros encontrados en ambas carpetas: {len(common_files)}")
+    log("=" * 80)
 
     if not common_files:
-        print("No se han encontrado ficheros .nc con el mismo nombre en ambas carpetas.")
+        log("No se han encontrado ficheros .nc con el mismo nombre en ambas carpetas.")
+        save_report(report_lines)
         return
 
     equal_count = 0
@@ -144,88 +242,64 @@ def main():
         file1 = files_1[filename]
         file2 = files_2[filename]
 
-        print(f"\n{filename}")
+        log("")
+        log(filename)
 
-        are_equal, max_difference = compare_netcdf_files(file1, file2)
+        # Se captura lo que imprime compare_netcdf_files para que los
+        # avisos tambien queden recogidos en el informe
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            are_equal, max_difference = compare_netcdf_files(file1, file2)
+
+        captured = buffer.getvalue().rstrip()
+        if captured:
+            log(captured)
 
         if are_equal:
             equal_count += 1
-            print(f"  IGUALES     | Diferencia máxima: {max_difference:.12e}")
+            log(f"  IGUALES     | Diferencia máxima: {max_difference:.12e}")
         else:
             different_count += 1
 
             if np.isfinite(max_difference):
-                print(f"  DIFERENTES  | Diferencia máxima: {max_difference:.12e}")
+                log(f"  DIFERENTES  | Diferencia máxima: {max_difference:.12e}")
             else:
-                print("  DIFERENTES  | No se puede calcular la diferencia máxima")
+                log("  DIFERENTES  | No se puede calcular la diferencia máxima")
 
     # ========================================================
     # RESUMEN
     # ========================================================
 
-    print("\n" + "=" * 80)
-    print("RESUMEN")
-    print("=" * 80)
-    print(f"Ficheros comparados: {len(common_files)}")
-    print(f"Iguales:             {equal_count}")
-    print(f"Diferentes:          {different_count}")
-    print("=" * 80)
+    log("")
+    log("=" * 80)
+    log("RESUMEN")
+    log("=" * 80)
+    log(f"Ficheros comparados: {len(common_files)}")
+    log(f"Iguales:             {equal_count}")
+    log(f"Diferentes:          {different_count}")
+    log("=" * 80)
+
+    if different_count == 0:
+        log("CONCLUSION: todas las salidas L1B coinciden con las de "
+            "referencia bajo el criterio aplicado.")
+    else:
+        log(f"CONCLUSION: {different_count} fichero(s) NO coinciden con las "
+            "salidas de referencia.")
+    log("=" * 80)
+
+    save_report(report_lines)
 
 
-if __name__ == "__main__":
-    main()
-
-
-# PLOT FROM YOUR OUTPUTS THE EQUALISED OUTPUT VERSUS NOT EQUALISED VERSUS THE TRUTH
+# ============================================================
+# PLOT DE LA ECUALIZACION - FUNCIONES
+# ============================================================
+# PLOT FROM YOUR OUTPUTS THE EQUALISED OUTPUT VERSUS NOT EQUALISED
+# VERSUS THE TRUTH
 # TRUTH = EODP-TS-L1B\input\ism_toa_isrf_VNIR-0.nc
-from pathlib import Path
-
-import numpy as np
-import xarray as xr
-import matplotlib.pyplot as plt
-
-# ============================================================
-# CONFIGURACIÓN
 # ============================================================
 
-# Fichero SIN equalización (en rojo)
-NO_EQ_FILE = Path(
-    r"C:\Users\Noel\Documents\NOEL\UNIVERSIDAD\MASTER\TELECO\ACADEMICO\26-27\1er cuatri\EODP\FILES\EODP_TER_2021\EODP_TER_2021\EODP-TS-L1B\output_noel_no_equalized\l1b_toa_VNIR-0.nc"
-)
-
-# Fichero CON equalización (en negro)
-EQ_FILE = Path(
-    r"C:\Users\Noel\Documents\NOEL\UNIVERSIDAD\MASTER\TELECO\ACADEMICO\26-27\1er cuatri\EODP\FILES\EODP_TER_2021\EODP_TER_2021\EODP-TS-L1B\output_noel\l1b_toa_VNIR-0.nc"
-)
-
-# Fichero de ENTRADA / ISRF (en azul)
-ISRF_FILE = Path(
-    r"C:\Users\Noel\Documents\NOEL\UNIVERSIDAD\MASTER\TELECO\ACADEMICO\26-27\1er cuatri\EODP\FILES\EODP_TER_2021\EODP_TER_2021\EODP-TS-L1B\input\ism_toa_isrf_VNIR-0.nc"
-)
-
-# Carpeta y nombre del PNG de salida
-OUTPUT_DIR = Path(
-    r"C:\Users\Noel\Documents\NOEL\UNIVERSIDAD\MASTER\TELECO\ACADEMICO\26-27\1er cuatri\EODP\FILES\EODP_TER_2021\EODP_TER_2021\EODP-TS-L1B"
-)
-OUTPUT_FILENAME = "equalization_effect_VNIR-0.png"
-
-# Fila (row) a extraer de cada fichero
-ROW_INDEX = 50
-
-# Nombre de la variable a leer dentro del .nc.
-# Si se deja en None, se usa automáticamente la única variable de datos
-# (no-coordenada) que tenga el fichero.
-VARIABLE_NAME = None
-
-# Nombre de la banda, usado solo para el título de la gráfica
-BAND_NAME = "VNIR-0"
-
-
-# ============================================================
-# FUNCIONES
-# ============================================================
-
-def get_row_from_nc(file_path: Path, row_index: int, variable_name: str | None):
+def get_row_from_nc(file_path: Path, row_index: int,
+                    variable_name: Optional[str]):
     with xr.open_dataset(file_path) as ds:
 
         if variable_name is None:
@@ -252,11 +326,8 @@ def get_row_from_nc(file_path: Path, row_index: int, variable_name: str | None):
         return data[row_index, :]
 
 
-# ============================================================
-# GENERAR GRÁFICA
-# ============================================================
-
-def main():
+def plot_equalization_effect():
+    """Genera el PNG ecualizada vs no ecualizada vs verdad."""
 
     row_no_eq = get_row_from_nc(NO_EQ_FILE, ROW_INDEX, VARIABLE_NAME)
     row_eq = get_row_from_nc(EQ_FILE, ROW_INDEX, VARIABLE_NAME)
@@ -288,6 +359,15 @@ def main():
     print(f"Gráfica guardada en: {output_path}")
 
 
-if __name__ == "__main__":
-    main()
+# ============================================================
+# EJECUCION
+# ============================================================
 
+if __name__ == "__main__":
+    # Cross validation de las salidas L1B
+    run_crossvalidation()
+
+    print()
+
+    # Plot del efecto de la ecualizacion
+    plot_equalization_effect()
