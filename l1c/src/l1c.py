@@ -82,7 +82,13 @@ class l1c(initL1c):
 
         for ii in range(len(mgrs_tiles)):
             (lat_l1c[ii], lon_l1c[ii]) = m.toLatLon(mgrs_tiles[ii])
-            toa_l1c = bisplev(lat_l1c[ii], lon_l1c[ii], tck)
+            # OJO: hay que asignar al elemento ii, no al array completo.
+            # bisplev con coordenadas escalares devuelve un float, asi que
+            # 'toa_l1c = bisplev(...)' destruiria el vector y writeL1c
+            # fallaria con "IndexError: invalid index to scalar variable".
+            toa_l1c[ii] = bisplev(lat_l1c[ii], lon_l1c[ii], tck)
+
+        self.logger.debug("Number of MGRS tiles (L1C points): " + str(len(mgrs_tiles)))
 
         return lat_l1c, lon_l1c, toa_l1c
 
@@ -97,4 +103,13 @@ class l1c(initL1c):
         :param toa: Radiance 2D matrix
         :return: NA
         '''
-        #TODO
+        if lat.shape != toa.shape:
+            error_message = ("The L1B radiances and the GM geodetic "
+                             "coordinates do not have the same size: "
+                             "toa " + str(toa.shape) + " vs lat "
+                             + str(lat.shape))
+            self.logger.error(error_message)
+            raise Exception(error_message)
+
+        self.logger.debug("Size check OK. TOA and geodetic coordinates are "
+                          + str(toa.shape))
