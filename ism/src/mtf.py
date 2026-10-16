@@ -72,6 +72,18 @@ class mtf:
         self.logger.debug("Calculation of the Sysmtem MTF by multiplying the different contributors")
         Hsys = Hdiff * Hdefoc * Hdet * Hsmear * Hmotion * Hwfe # dummy
 
+        # Guardar las MTF en .nc (flag save_mtfs de config/ismConfig.py).
+        # Permite cross-validarlas contra las salidas de referencia y que el
+        # test del ISM determine cual es la MTF dominante del sistema.
+        if self.ismConfig.save_mtfs:
+            writeMat(directory, 'Hdiff_' + band, Hdiff)
+            writeMat(directory, 'Hdefoc_' + band, Hdefoc)
+            writeMat(directory, 'Hwfe_' + band, Hwfe)
+            writeMat(directory, 'Hdet_' + band, Hdet)
+            writeMat(directory, 'Hsmear_' + band, Hsmear)
+            writeMat(directory, 'Hmotion_' + band, Hmotion)
+            writeMat(directory, 'Hsys_' + band, Hsys)
+
         # Plot cuts ACT/ALT of the MTF
         self.plotMtf(Hdiff, Hdefoc, Hwfe, Hdet, Hsmear, Hmotion, Hsys, nlines, ncolumns, fnAct, fnAlt, directory, band)
 
@@ -275,7 +287,7 @@ class mtf:
                 x=0.5, color="black", linestyle="--", label="f Nyquist", linewidth=1.5
             )
 
-            plt.title(f"System MTF - slice {direction_label}")
+            plt.title(f"System MTF {band} - slice {direction_label}")
             plt.xlabel("Spatial frequencies f/(1/w) [-]")
             plt.ylabel("MTF")
             plt.xlim(0.0, 0.51)
@@ -285,11 +297,17 @@ class mtf:
             plt.tight_layout()
 
             # Guardar en directorio original
-            plt.savefig(os.path.join(directory, filename), dpi=300)
+            savestr = os.path.join(directory, filename)
+            plt.savefig(savestr, dpi=300)
+            print("Saved image " + savestr)
 
-            # Mostrar imagen
-            plt.show()
+            # Se cierra la figura en vez de hacer plt.show().
+            # Con 4 bandas x 2 cortes se abririan 8 ventanas que bloquean
+            # la ejecucion del ISM hasta cerrarlas una a una.
+            plt.close()
 
-        # Se llama a la función anterior creada para los dos plot
-        _plot_slice(fnAct, "ACT", "mtf_act.png")
-        _plot_slice(fnAlt, "ALT", "mtf_alt.png")
+        # Se llama a la función anterior creada para los dos plot.
+        # El nombre del fichero incluye la banda para que las 4 bandas no
+        # se sobreescriban entre ellas (antes quedaban solo las de VNIR-3).
+        _plot_slice(fnAct, "ACT", "mtf_act_" + band + ".png")
+        _plot_slice(fnAlt, "ALT", "mtf_alt_" + band + ".png")

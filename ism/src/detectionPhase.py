@@ -142,20 +142,35 @@ class detectionPhase(initIsm):
         :param dead_pix_red: Reduction in the quantum efficiency for the dead pixels [-, over 1]
         :return: toa in e- including bad & dead pixels
         """
-        #TODO
         nact = toa.shape[1]
 
-        # Bad pixels: evenly spaced ACT columns, one every 100/bad_pix pixels
-        if bad_pix > 0:
-            step_bad = int(round(100.0 / bad_pix))
-            idx_bad = np.arange(step_bad // 2, nact, step_bad)
+        # Numero de columnas ACT afectadas. Se trunca, como el numero de
+        # pixeles defectuosos es entero:
+        #   bad  -> int(1.0/100*150) = 1 columna
+        #   dead -> int(0.5/100*150) = 0 columnas
+        n_bad = int(bad_pix / 100 * nact)
+        n_dead = int(dead_pix / 100 * nact)
+
+        # Sorteo uniforme de "calidad" por columna ACT. Los valores mas bajos
+        # son los pixeles de peor calidad: primero se asignan los dead y los
+        # bad a los peores del sorteo.
+        # OJO: esta llamada va despues de las de prnu y darkSignal, asi que
+        # depende del estado del generador. No cambiar el orden en compute().
+        quality = np.random.uniform(0, 1, nact)
+        order = np.argsort(quality)
+
+        idx_bad = order[:n_bad]
+        idx_dead = order[n_bad:n_bad + n_dead]
+
+        # Reduccion de la eficiencia cuantica de cada tipo de pixel
+        if idx_bad.size > 0:
             toa[:, idx_bad] = toa[:, idx_bad] * (1.0 - bad_pix_red)
 
-        # Dead pixels: evenly spaced ACT columns, one every 100/dead_pix pixels
-        if dead_pix > 0:
-            step_dead = int(round(100.0 / dead_pix))
-            idx_dead = np.arange(step_dead - 1, nact, step_dead)
+        if idx_dead.size > 0:
             toa[:, idx_dead] = toa[:, idx_dead] * (1.0 - dead_pix_red)
+
+        self.logger.debug("Bad pixels (ACT): " + str(list(idx_bad)))
+        self.logger.debug("Dead pixels (ACT): " + str(list(idx_dead)))
 
         return toa
 

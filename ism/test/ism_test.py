@@ -6,6 +6,11 @@
 #     los compara uno a uno con los de la carpeta de referencia del profesor
 #     y calcula TODAS las diferencias (absolutas y relativas).
 #
+# run_mtf_analysis()
+#     Lee las 6 MTF y la del sistema guardadas por mtf.py, las evalua en la
+#     frecuencia de Nyquist y determina cual es la MTF DOMINANTE del
+#     sistema, banda por banda y en las dos direcciones (ACT y ALT).
+#
 # run_unit_conversion_check()
 #     Tabla con el factor de conversion de cada paso del ISM y comprobacion,
 #     desde el pixel central toa[50,75], de que las salidas guardadas
@@ -36,6 +41,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from auxiliary.constants import constants          # noqa: E402
+from common.io.readMat import readMat            # noqa: E402
 from common.io.writeToa import readToa             # noqa: E402
 from common.src.auxFunc import getIndexBand        # noqa: E402
 from config.globalConfig import globalConfig       # noqa: E402
@@ -84,27 +90,37 @@ ABS_FLOOR = 1e-12
 # UTILIDADES COMUNES
 # ============================================================================
 
-def quiet_read_toa(folder, filename):
+def quiet_read_matrix(folder, filename):
     """
-    Lee un TOA con el lector del proyecto, silenciando sus prints.
+    Lee una matriz 2D de un .nc silenciando los prints del lector.
+
+    Los productos TOA guardan la variable 'toa' y las matrices de MTF
+    (Hdiff_*, Hsys_*, ...) guardan la variable 'mat', asi que se prueban
+    los dos lectores del proyecto.
 
     :param folder: carpeta que contiene el fichero
     :param filename: nombre del fichero con extension .nc
-    :return: matriz TOA, o None si el fichero no existe o no se puede leer
+    :return: matriz, o None si el fichero no existe o no se puede leer
     """
     full_path = os.path.join(str(folder), filename)
 
     if not os.path.isfile(full_path):
         return None
 
-    try:
-        buffer = io.StringIO()
-        with redirect_stdout(buffer):
-            toa = readToa(str(folder), filename)
-        return toa
-    except (OSError, RuntimeError, KeyError, IndexError) as error:
-        print(f"  AVISO: no se pudo leer {full_path} -> {error}")
-        return None
+    for reader in (readToa, readMat):
+        try:
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                return reader(str(folder), filename)
+        except KeyError:
+            # Ese lector no encuentra su variable, se prueba el siguiente
+            continue
+        except (OSError, RuntimeError, IndexError) as error:
+            print(f"  AVISO: no se pudo leer {full_path} -> {error}")
+            return None
+
+    print(f"  AVISO: {full_path} no tiene ni la variable 'toa' ni 'mat'")
+    return None
 
 
 def relative_difference_pct(mine, reference):
@@ -239,8 +255,8 @@ def compare_toa_files(filename):
         "note": "",
     }
 
-    toa_mine = quiet_read_toa(FOLDER_MINE, filename)
-    toa_ref = quiet_read_toa(FOLDER_REFERENCE, filename)
+    toa_mine = quiet_read_matrix(FOLDER_MINE, filename)
+    toa_ref = quiet_read_matrix(FOLDER_REFERENCE, filename)
 
     if toa_mine is None or toa_ref is None:
         result["note"] = "no se pudo leer uno de los dos ficheros"
@@ -375,6 +391,216 @@ def run_crossvalidation(log):
 
 
 # ============================================================================
+# PREGUNTA 2 - MTF DEL SISTEMA Y MTF DOMINANTE
+# ----------------------------------------------------------------------------
+# Las 6 contribuciones y la MTF del sistema se guardan en .nc desde
+# ism/src/mtf.py (flag save_mtfs). Aqui se evaluan en la frecuencia de
+# Nyquist (f/(1/w) = 0.5), que es donde se juega la resolucion del
+# instrumento: la contribucion DOMINANTE es la que toma el valor mas bajo,
+# porque es la que mas limita la MTF del sistema.
+#
+# Las graficas (mtf_act_<band>.png y mtf_alt_<band>.png) las genera el ISM
+# al ejecutarse, con las 6 contribuciones + la del sistema y la linea de
+# Nyquist.
+# ============================================================================
+
+# Nombre del fichero -> etiqueta para la tabla
+MTF_CONTRIBUTIONS = [
+    ("Hdiff", "Difraccion"),
+    ("Hdefoc", "Desenfoque"),
+    ("Hwfe", "Aberraciones WFE"),
+    ("Hdet", "Detector"),
+    ("Hsmear", "Smearing (ALT)"),
+    ("Hmotion", "Motion blur"),
+]
+
+MTF_SYSTEM = ("Hsys", "SISTEMA (producto)")
+
+
+def sample_at_nyquist(matrix, direction):
+    """
+    Evalua una MTF en la frecuencia de Nyquist de una direccion.
+
+    Las frecuencias normalizadas van de -0.5 a +0.5, con la frecuencia cero
+    en el centro de la matriz, asi que Nyquist cae en el ultimo indice.
+
+    :param matrix: matriz 2D de la MTF
+    :param direction: 'ACT' o 'ALT'
+    :return: (valor en Nyquist, valor en frecuencia cero)
+    """
+    nlines, ncolumns = matrix.shape
+    mid_line = nlines // 2
+    mid_col = ncolumns // 2
+
+    if direction == "ACT":
+        return float(matrix[mid_line, ncolumns - 1]), float(matrix[mid_line, mid_col])
+
+    return float(matrix[nlines - 1, mid_col]), float(matrix[mid_line, mid_col])
+
+
+def run_mtf_analysis(log):
+    """
+    PREGUNTA 2: identifica la MTF dominante del sistema, banda por banda.
+
+    :param log: funcion que imprime y acumula una linea del informe
+    :return: True si se ha podido hacer el analisis
+    """
+    global_config = globalConfig()
+    bands = BANDS if BANDS is not None else list(global_config.bands)
+
+    log("")
+    log("=" * 104)
+    log("PREGUNTA 2 - MTF DEL SISTEMA Y MTF DOMINANTE")
+    log("=" * 104)
+    log(f"Mis salidas : {FOLDER_MINE}")
+    log(f"Bandas      : {', '.join(bands)}")
+    log("Criterio    : la MTF dominante es la que toma el valor mas bajo en "
+        "la frecuencia de Nyquist (f/(1/w) = 0.5),")
+    log("              porque es la que mas limita la MTF del sistema.")
+    log("Graficas    : mtf_act_<banda>.png y mtf_alt_<banda>.png "
+        "(generadas por el ISM)")
+    log("=" * 104)
+
+    dominant_act = {}
+    dominant_alt = {}
+    any_band = False
+
+    for band in bands:
+
+        matrices = {}
+        missing = []
+
+        for key, _label in MTF_CONTRIBUTIONS + [MTF_SYSTEM]:
+            matrix = quiet_read_matrix(FOLDER_MINE, key + "_" + band + ".nc")
+            if matrix is None:
+                missing.append(key + "_" + band + ".nc")
+            else:
+                matrices[key] = np.asarray(matrix, dtype=float)
+
+        log("")
+        log("=" * 104)
+        log(f"BANDA {band}")
+        log("=" * 104)
+
+        if missing:
+            log(f"  No se encuentran {len(missing)} fichero(s) de MTF, "
+                f"por ejemplo {missing[0]}.")
+            log("  Hay que ejecutar el ISM con save_mtfs = True en "
+                "config/ismConfig.py para que mtf.py los guarde.")
+            continue
+
+        any_band = True
+
+        header = (
+            f"{'CONTRIBUCION':<22}{'ACT @ Nyquist':>16}{'ALT @ Nyquist':>16}"
+            f"{'ACT @ f=0':>14}{'ALT @ f=0':>14}"
+        )
+        log(header)
+        log("-" * len(header))
+
+        values_act = {}
+        values_alt = {}
+
+        for key, label in MTF_CONTRIBUTIONS:
+            nyq_act, zero_act = sample_at_nyquist(matrices[key], "ACT")
+            nyq_alt, zero_alt = sample_at_nyquist(matrices[key], "ALT")
+
+            values_act[label] = nyq_act
+            values_alt[label] = nyq_alt
+
+            log(f"{label:<22}{nyq_act:>16.6f}{nyq_alt:>16.6f}"
+                f"{zero_act:>14.6f}{zero_alt:>14.6f}")
+
+        log("-" * len(header))
+
+        sys_key, sys_label = MTF_SYSTEM
+        sys_nyq_act, sys_zero_act = sample_at_nyquist(matrices[sys_key], "ACT")
+        sys_nyq_alt, sys_zero_alt = sample_at_nyquist(matrices[sys_key], "ALT")
+
+        log(f"{sys_label:<22}{sys_nyq_act:>16.6f}{sys_nyq_alt:>16.6f}"
+            f"{sys_zero_act:>14.6f}{sys_zero_alt:>14.6f}")
+        log("")
+
+        # Comprobacion: el producto de las 6 debe reproducir la del sistema
+        product_act = 1.0
+        product_alt = 1.0
+        for key, label in MTF_CONTRIBUTIONS:
+            product_act *= values_act[label]
+            product_alt *= values_alt[label]
+
+        log(f"  Producto de las 6 contribuciones en Nyquist: "
+            f"ACT = {product_act:.6f}, ALT = {product_alt:.6f}")
+        log(f"  MTF del sistema en Nyquist                 : "
+            f"ACT = {sys_nyq_act:.6f}, ALT = {sys_nyq_alt:.6f}")
+
+        diff_act = scalar_rel_diff_pct(product_act, sys_nyq_act)
+        diff_alt = scalar_rel_diff_pct(product_alt, sys_nyq_alt)
+        log(f"  Diferencia relativa                        : "
+            f"ACT = {fmt(diff_act, 3)} %, ALT = {fmt(diff_alt, 3)} %")
+        log("")
+
+        # Ordenacion: la dominante es la de valor mas bajo
+        order_act = sorted(values_act.items(), key=lambda item: item[1])
+        order_alt = sorted(values_alt.items(), key=lambda item: item[1])
+
+        dominant_act[band] = order_act[0]
+        dominant_alt[band] = order_alt[0]
+
+        log("  Orden de mayor a menor limitacion en ACT "
+            "(de la mas restrictiva a la menos):")
+        for position, (label, value) in enumerate(order_act, start=1):
+            log(f"    {position}. {label:<22} {value:.6f}")
+
+        log("")
+        log("  Orden de mayor a menor limitacion en ALT:")
+        for position, (label, value) in enumerate(order_alt, start=1):
+            log(f"    {position}. {label:<22} {value:.6f}")
+
+        log("")
+        log(f"  MTF DOMINANTE en ACT: {order_act[0][0]} "
+            f"({order_act[0][1]:.6f} en Nyquist)")
+        log(f"  MTF DOMINANTE en ALT: {order_alt[0][0]} "
+            f"({order_alt[0][1]:.6f} en Nyquist)")
+
+    # --- Conclusiones -------------------------------------------------------
+    log("")
+    log("=" * 104)
+    log("CONCLUSIONES DE LA PREGUNTA 2")
+    log("=" * 104)
+
+    if not any_band:
+        log("No se ha podido hacer el analisis: faltan los ficheros de MTF.")
+        log("Ejecuta el ISM con save_mtfs = True y vuelve a lanzar el test.")
+        log("=" * 104)
+        return False
+
+    log("MTF dominante por banda:")
+    for band in sorted(dominant_act):
+        label_act, value_act = dominant_act[band]
+        label_alt, value_alt = dominant_alt[band]
+        log(f"  {band}:  ACT -> {label_act} ({value_act:.6f})"
+            f"   |   ALT -> {label_alt} ({value_alt:.6f})")
+
+    log("")
+    log("Interpretacion de las dos graficas:")
+    log("  - Corte ACT (across track): intervienen difraccion, desenfoque, "
+        "aberraciones WFE, detector y motion blur. El smearing vale 1 porque "
+        "solo actua en la direccion ALT.")
+    log("  - Corte ALT (along track): las mismas contribuciones mas el "
+        "smearing, que aparece por el desplazamiento del satelite durante "
+        "el tiempo de integracion. Por eso la MTF de sistema en ALT es "
+        "siempre menor o igual que en ACT.")
+    log("  - La MTF del sistema es el producto de las 6, por lo que siempre "
+        "queda por debajo de todas ellas.")
+    log("  - La contribucion con el valor mas bajo en Nyquist es la que "
+        "dimensiona el sistema: mejorar cualquier otra apenas sube la MTF "
+        "total mientras esa siga siendo la limitante.")
+    log("=" * 104)
+
+    return True
+
+
+# ============================================================================
 # PREGUNTA 3 - FACTORES DE CONVERSION Y PIXEL CENTRAL, POR BANDA
 # ----------------------------------------------------------------------------
 # Cadena del ISM y unidades:
@@ -391,7 +617,9 @@ def run_crossvalidation(log):
 #   ism_toa_detection_* [e-]
 #     -> E2V            x OCF*ADC_gain                 -> [V]
 #     -> V2DN           x 4095/(Vmax-Vmin), redondeo   -> [DN]
-#   ism_toa_vcu_*       [DN]  ==  ism_toa_*  [DN]
+#   ism_toa_*           [DN]  salida del VCU (el ISM no guarda un producto
+#                             intermedio ism_toa_vcu_*: el bloque
+#                             save_vcu_stage solo hace los plots)
 # ============================================================================
 
 def digitisation_scalar(voltage, bit_depth, min_voltage, max_voltage):
@@ -418,7 +646,7 @@ def read_central_pixel(folder, filename):
     :param filename: nombre del fichero sin la extension
     :return: valor en [ALT_IDX, ACT_IDX], o None si no esta disponible
     """
-    toa = quiet_read_toa(folder, filename + ".nc")
+    toa = quiet_read_matrix(folder, filename + ".nc")
 
     if toa is None:
         return None
@@ -494,7 +722,6 @@ def build_chain_rows(band, ism_config, global_config, factors):
     v_prnu = read_central_pixel(FOLDER_MINE, global_config.ism_toa_prnu + band)
     v_ds = read_central_pixel(FOLDER_MINE, global_config.ism_toa_ds + band)
     v_det = read_central_pixel(FOLDER_MINE, global_config.ism_toa_detection + band)
-    v_vcu = read_central_pixel(FOLDER_MINE, global_config.ism_toa_vcu + band)
     v_final = read_central_pixel(FOLDER_MINE, global_config.ism_toa + band)
 
     rows = []
@@ -612,6 +839,10 @@ def build_chain_rows(band, ism_config, global_config, factors):
     })
 
     # 8. Voltios -> Cuentas digitales
+    # OJO: el ISM no guarda un producto intermedio del VCU. El bloque
+    # save_vcu_stage de videoChainPhase solo hace los plots, no llama a
+    # writeToa. La salida del VCU es directamente ism_toa_<band>.nc, que
+    # escribe ism.py justo despues de myVcu.compute().
     exp_dn = None
     saturated_adc = False
     if exp_v is not None:
@@ -630,30 +861,20 @@ def build_chain_rows(band, ism_config, global_config, factors):
         "factor": factors["v2dn"],
         "value_in": exp_v,
         "expected": exp_dn,
-        "actual": v_vcu,
-        "rel": scalar_rel_diff_pct(v_vcu, exp_dn),
-        "check": True,
-        "note": (f"SATURADO en {max_dn} DN (Vmax = {ism_config.max_voltage} V)")
-        if saturated_adc else f"{max_dn}/(Vmax-Vmin), no lineal: satura y redondea",
-    })
-
-    # 9. Salida final, debe ser identica a la del VCU
-    rows.append({
-        "step": "SALIDA ISM",
-        "units": "DN",
-        "factor": 1.0,
-        "value_in": v_vcu,
-        "expected": v_vcu,
         "actual": v_final,
-        "rel": scalar_rel_diff_pct(v_final, v_vcu),
+        "rel": scalar_rel_diff_pct(v_final, exp_dn),
         "check": True,
-        "note": "ism_toa_* debe ser identico a ism_toa_vcu_*",
+        "note": (f"SATURADO en {max_dn} DN (Vmax = {ism_config.max_voltage} V). "
+                 f"Comparado contra ism_toa_{band}.nc, que es la salida del VCU")
+        if saturated_adc else
+        (f"{max_dn}/(Vmax-Vmin), no lineal: satura y redondea. "
+         f"Comparado contra ism_toa_{band}.nc, que es la salida del VCU"),
     })
 
     saturation = {
         "fwc": saturated_fwc,
         "adc": saturated_adc,
-        "dn_at_max": (v_vcu is not None and v_vcu >= max_dn),
+        "dn_at_max": (v_final is not None and v_final >= max_dn),
         "max_dn": max_dn,
     }
 
@@ -783,7 +1004,7 @@ def run_unit_conversion_check(log):
     log("CONCLUSIONES DE LA PREGUNTA 3")
     log("=" * 104)
     log("Pasos que se cierran contra un fichero guardado: PH2E "
-        "(ism_toa_e_*), V2DN (ism_toa_vcu_*) y la copia final (ism_toa_*).")
+        "(ism_toa_e_*) y V2DN (ism_toa_*, que es la salida del VCU).")
     log("IRR2PH y E2V no tienen producto intermedio, se propagan "
         "analiticamente.")
     log("RAD2IRRAD se muestra pero no entra en el veredicto: el residuo viene "
@@ -835,15 +1056,18 @@ def main():
         report_lines.append(message)
 
     crossval_ok = run_crossvalidation(log)
+    mtf_ok = run_mtf_analysis(log)
     conversions_ok = run_unit_conversion_check(log)
 
     log("")
     log("=" * 104)
     log("RESUMEN GLOBAL DEL TEST DEL ISM")
     log("=" * 104)
-    log(f"Cross validation de las salidas : "
+    log(f"P1 - Cross validation de las salidas : "
         f"{'CORRECTO' if crossval_ok else 'CON DIFERENCIAS'}")
-    log(f"Conversiones de unidades        : "
+    log(f"P2 - Analisis de la MTF dominante    : "
+        f"{'CORRECTO' if mtf_ok else 'NO REALIZADO'}")
+    log(f"P3 - Conversiones de unidades        : "
         f"{'CORRECTO' if conversions_ok else 'CON DIFERENCIAS'}")
     log("=" * 104)
 
