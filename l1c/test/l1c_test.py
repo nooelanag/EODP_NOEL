@@ -238,17 +238,30 @@ def describe_series(distances, label, log):
     """
     Imprime las estadisticas de una serie de distancias.
 
+    Se usan 6 decimales porque la variacion de la GSD across track en una
+    escena estrecha es del orden de fracciones de milimetro: con solo 3
+    decimales se mostraria como 0.000 m y pareceria exactamente constante.
+
     :param distances: vector de distancias [m]
     :param label: etiqueta para los mensajes
     :param log: funcion que imprime y acumula
     """
+    media = float(np.mean(distances))
+    minimo = float(np.min(distances))
+    maximo = float(np.max(distances))
+    variacion = maximo - minimo
+
     log(f"  {label}")
     log(f"    numero de puntos : {distances.size}")
-    log(f"    media            : {np.mean(distances):.3f} m")
-    log(f"    minimo           : {np.min(distances):.3f} m")
-    log(f"    maximo           : {np.max(distances):.3f} m")
-    log(f"    desviacion tipica: {np.std(distances):.3f} m")
-    log(f"    variacion max-min: {np.max(distances) - np.min(distances):.3f} m")
+    log(f"    media            : {media:.6f} m")
+    log(f"    minimo           : {minimo:.6f} m")
+    log(f"    maximo           : {maximo:.6f} m")
+    log(f"    desviacion tipica: {float(np.std(distances)):.6f} m")
+    log(f"    variacion max-min: {variacion:.6f} m  "
+        f"({variacion * 1000:.3f} mm)")
+
+    if media > 0:
+        log(f"    variacion rel.   : {variacion / media * 100:.6f} %")
 
 
 # ============================================================================
@@ -408,13 +421,33 @@ def run_gsd_analysis(log):
     log(f"  Grafica guardada en: {path_alt}")
 
     log("")
+    log("  Geometria del swath (explica la forma de la curva across track):")
+    swath = float(np.mean(gsd_act)) * nact
+    # Altura orbital implicita a partir de la GSD: GSD = h * pix / f
+    pix_size, focal = 30e-6, 0.5262
+    orbit_h = float(np.mean(gsd_act)) * focal / pix_size
+    theta_edge = np.degrees(np.arctan((swath / 2.0) / orbit_h))
+    gsd_edge_theory = float(np.mean(gsd_act)) / np.cos(np.radians(theta_edge)) ** 2
+    log(f"    anchura del swath        : {swath / 1000:.3f} km "
+        f"({nact} pixeles)")
+    log(f"    altura orbital implicita : {orbit_h / 1000:.1f} km")
+    log(f"    angulo al borde del swath: {theta_edge:.4f} deg")
+    log(f"    variacion teorica 1/cos^2: "
+        f"{(gsd_edge_theory - float(np.mean(gsd_act))) * 1000:.3f} mm "
+        f"({(gsd_edge_theory / float(np.mean(gsd_act)) - 1) * 100:.6f} %)")
+    log("    Con un swath tan estrecho el angulo de observacion apenas "
+        "cambia de un extremo al otro, asi que la GSD across track es "
+        "practicamente constante. La curvatura solo es apreciable en "
+        "swaths mucho mas anchos.")
+
+    log("")
     log("  Interpretacion:")
     log("    - La GSD along track sale practicamente constante: el satelite "
         "avanza a velocidad uniforme y el muestreo temporal es fijo.")
-    log("    - La GSD across track varia a lo largo de la fila por la "
-        "geometria de observacion: los pixeles del borde miran con un "
-        "angulo mayor, su huella en el suelo se alarga y la distancia "
-        "entre muestras crece respecto al centro.")
+    log("    - La GSD across track deberia crecer hacia los bordes porque "
+        "los pixeles extremos miran con mayor angulo y su huella en el "
+        "suelo se alarga, pero en esta escena ese efecto es de fracciones "
+        "de milimetro (ver la geometria del swath de arriba).")
     log("    - La rejilla L1C, en cambio, es regular a 100 m por "
         "construccion, porque se proyecta sobre las teselas MGRS en "
         "coordenadas UTM (zona 31R).")
@@ -480,6 +513,17 @@ def run_toa_plots(log):
         log(f"  {band}: grafica guardada en {output_path} "
             f"({toa.size} puntos, TOA de {np.min(toa):.4f} a "
             f"{np.max(toa):.4f} mW/m2/sr)")
+
+        # Una radiancia negativa no tiene sentido fisico: es un artefacto
+        # del spline bivariante, que oscila donde la senal tiene un
+        # escalon brusco (por ejemplo en los pixeles saturados del ISM).
+        n_negative = int(np.count_nonzero(toa < 0))
+        if n_negative > 0:
+            log(f"      AVISO: {n_negative} punto(s) con radiancia negativa "
+                f"(minimo {np.min(toa):.4f} mW/m2/sr). No tiene sentido "
+                f"fisico: es el overshoot del spline de bisplrep en zonas "
+                f"de gradiente fuerte o saturadas.")
+
         generated += 1
 
     log(f"  Graficas generadas: {generated} de {len(global_config.bands)}")
