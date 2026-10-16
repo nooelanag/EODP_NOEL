@@ -28,6 +28,7 @@
 # ============================================================================
 
 import io
+import math
 import os
 import sys
 from contextlib import redirect_stdout
@@ -44,8 +45,45 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from common.io.l1cProduct import readL1c              # noqa: E402
 from common.io.readGeodetic import readGeodetic, getCorners   # noqa: E402
-from common.src.auxGeom import haversine              # noqa: E402
 from config.globalConfig import globalConfig          # noqa: E402
+
+# common/src/auxGeom.py importa pyproj a nivel de modulo (lo necesita para
+# ecef2geo / geo2ecef, que aqui no se usan). Si pyproj no esta instalado se
+# usa una copia local de la MISMA formula y el MISMO radio que
+# auxGeom.haversine, para que el resultado numerico sea identico.
+try:
+    from common.src.auxGeom import haversine          # noqa: E402
+    HAVERSINE_SOURCE = "common/src/auxGeom.py"
+
+except ImportError:
+
+    def haversine(lat1, lon1, lat2, lon2):
+        """
+        Distancia geodetica sobre el terreno entre dos puntos.
+
+        Copia literal de common/src/auxGeom.haversine, para no depender de
+        pyproj. R = 6378137 m, radio equatorial WGS84.
+
+        :param lat1: latitud del primer punto [deg]
+        :param lon1: longitud del primer punto [deg]
+        :param lat2: latitud del segundo punto [deg]
+        :param lon2: longitud del segundo punto [deg]
+        :return: distancia entre los dos puntos [m]
+        """
+        R = 6378137  # [m] WGS84 Equatorial radius
+
+        phi1 = math.radians(lat1)
+        phi2 = math.radians(lat2)
+
+        dphi = np.abs(math.radians(lat2 - lat1))
+        dlambda = np.abs(math.radians(lon2 - lon1))
+
+        a = math.sin(dphi / 2) ** 2 + \
+            math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+
+        return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))  # [m]
+
+    HAVERSINE_SOURCE = "copia local identica (pyproj no instalado)"
 
 
 # ============================================================================
@@ -179,10 +217,6 @@ def quiet_read_l1c(folder, filename):
 def haversine_series(lat_vector, lon_vector):
     """
     Distancia Haversine entre puntos consecutivos de una serie.
-
-    Usa la funcion haversine de common/src/auxGeom.py, que es escalar,
-    para que el resultado sea consistente con el resto del proyecto
-    (R = 6378137 m, radio equatorial WGS84).
 
     :param lat_vector: latitudes consecutivas [deg]
     :param lon_vector: longitudes consecutivas [deg]
@@ -330,8 +364,8 @@ def run_gsd_analysis(log):
     log(f"  Rejilla L1B: {nalt} x {nact}")
     log(f"  Fila central (ALT)    : {central_row}")
     log(f"  Columna central (ACT) : {central_col}")
-    log("  Distancia calculada con la funcion haversine de "
-        "common/src/auxGeom.py (R = 6378137 m, WGS84)")
+    log(f"  Funcion haversine     : {HAVERSINE_SOURCE}")
+    log("  R = 6378137 m (radio equatorial WGS84)")
     log("")
 
     # --- ACROSS TRACK: entre columnas ACT consecutivas de la fila central ---
@@ -443,7 +477,9 @@ def run_toa_plots(log):
         plt.savefig(output_path, dpi=150)
         plt.close()
 
-        log(f"  {band}: grafica guardada en {output_path}")
+        log(f"  {band}: grafica guardada en {output_path} "
+            f"({toa.size} puntos, TOA de {np.min(toa):.4f} a "
+            f"{np.max(toa):.4f} mW/m2/sr)")
         generated += 1
 
     log(f"  Graficas generadas: {generated} de {len(global_config.bands)}")
@@ -607,8 +643,9 @@ def run_crossvalidation(log):
     else:
         log("  CONCLUSION: hay bandas que no cumplen el criterio. Si lo que "
             "falla es el numero de puntos o las coordenadas, el problema "
-            "esta en la seleccion de teselas MGRS de l1cProjtoa, no en la "
-            "interpolacion.")
+            "esta en la seleccion de teselas MGRS de l1cProjtoa. Si las "
+            "coordenadas coinciden y lo que difiere son las radiancias, el "
+            "problema esta en la interpolacion (parametros de bisplrep).")
 
     return all_ok
 
